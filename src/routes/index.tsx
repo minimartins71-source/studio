@@ -1,4 +1,4 @@
-import { createFileRoute } from '@tanstack/react-router'
+import { createFileRoute, Link } from '@tanstack/react-router'
 import { Check } from 'lucide-react'
 import {
   Accordion,
@@ -75,7 +75,7 @@ function HomePage() {
           publier.
         </p>
         <Button asChild size="lg" className="mt-8 h-12 w-full px-6 text-base sm:w-auto">
-          <a href="#prix">Commencer · 9,99 €/mois</a>
+          <Link to="/inscription">Commencer · 9,99 €/mois</Link>
         </Button>
       </section>
 
@@ -128,8 +128,8 @@ function HomePage() {
               </ul>
             </CardContent>
             <CardFooter>
-              <Button size="lg" className="h-12 w-full text-base">
-                Commencer
+              <Button asChild size="lg" className="h-12 w-full text-base">
+                <Link to="/inscription">Commencer</Link>
               </Button>
             </CardFooter>
           </Card>

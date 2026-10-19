@@ -1,5 +1,7 @@
+import { createClient } from '@supabase/supabase-js'
 import OpenAI from 'openai'
 import { zodTextFormat } from 'openai/helpers/zod'
+import { MONTHLY_LIMIT, startOfMonth } from '../src/lib/limits.js'
 import { DAYS, GenerateInput, WeekPlan } from '../src/lib/week-plan.js'
 
 // Modèle le moins cher d'OpenAI : environ 0,2 centime par semaine générée
@@ -21,9 +23,22 @@ function json(data: unknown, status = 200) {
 
 export async function POST(request: Request) {
   const apiKey = process.env.OPENAI_API_KEY
-  if (!apiKey) {
-    console.error('OPENAI_API_KEY manquante')
+  const supabaseUrl = process.env.VITE_SUPABASE_URL
+  const secretKey = process.env.SUPABASE_SECRET_KEY
+  if (!apiKey || !supabaseUrl || !secretKey) {
+    console.error('Variable d’environnement manquante')
     return json({ error: 'Le service est mal configuré. Réessaie plus tard.' }, 500)
+  }
+
+  // 1. Qui demande ? Le navigateur envoie le jeton de connexion du client.
+  const token = request.headers.get('authorization')?.replace(/^Bearer /, '')
+  const supabase = createClient(supabaseUrl, secretKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  })
+  const { data: auth } = token ? await supabase.auth.getUser(token) : { data: null }
+  const userId = auth?.user?.id
+  if (!userId) {
+    return json({ error: 'Connecte-toi pour préparer ta semaine.' }, 401)
   }
 
   const parsed = GenerateInput.safeParse(await request.json().catch(() => null))
@@ -32,8 +47,35 @@ export async function POST(request: Request) {
   }
   const { theme, network, style } = parsed.data
 
-  // La limite de 8 semaines par mois et par client sera vérifiée ici à l'étape 4,
-  // quand les comptes clients existeront.
+  // 2. Limite mensuelle : on compte les semaines déjà générées ce mois-ci.
+  const { count, error: countError } = await supabase
+    .from('generations')
+    .select('id', { count: 'exact', head: true })
+    .eq('user_id', userId)
+    .gte('created_at', startOfMonth().toISOString())
+  if (countError) {
+    console.error('Erreur Supabase (comptage)', countError)
+    return json({ error: 'Le service est indisponible. Réessaie dans un instant.' }, 500)
+  }
+  const used = count ?? 0
+  if (used >= MONTHLY_LIMIT) {
+    return json(
+      { error: `Tu as utilisé tes ${MONTHLY_LIMIT} semaines ce mois-ci. Rendez-vous le 1er du mois prochain.` },
+      429,
+    )
+  }
+
+  // 3. On réserve la génération avant d'appeler l'IA, et on l'annule en cas d'échec.
+  const { data: reservation, error: insertError } = await supabase
+    .from('generations')
+    .insert({ user_id: userId })
+    .select('id')
+    .single()
+  if (insertError) {
+    console.error('Erreur Supabase (réservation)', insertError)
+    return json({ error: 'Le service est indisponible. Réessaie dans un instant.' }, 500)
+  }
+  const cancel = () => supabase.from('generations').delete().eq('id', reservation.id)
 
   try {
     const openai = new OpenAI({ apiKey })
@@ -47,6 +89,7 @@ export async function POST(request: Request) {
 
     const plan = response.output_parsed
     if (!plan || plan.posts.length !== DAYS.length) {
+      await cancel()
       return json({ error: "La semaine n'est pas complète. Réessaie." }, 502)
     }
 
@@ -56,9 +99,10 @@ export async function POST(request: Request) {
       post.hashtags = post.hashtags.map((tag) => '#' + tag.replace(/^#+/, '').replace(/\s+/g, ''))
     }
 
-    return json({ plan })
+    return json({ plan, used: used + 1, limit: MONTHLY_LIMIT })
   } catch (error) {
     console.error('Erreur OpenAI', error)
+    await cancel()
     return json({ error: 'Le service IA ne répond pas. Réessaie dans un instant.' }, 502)
   }
 }
