@@ -1,6 +1,6 @@
 import OpenAI from 'openai'
 import { zodTextFormat } from 'openai/helpers/zod'
-import { DAYS, GenerateInput, WeekPlan } from '../src/lib/week-plan'
+import { DAYS, GenerateInput, WeekPlan } from '../src/lib/week-plan.js'
 
 // Modèle le moins cher d'OpenAI : environ 0,2 centime par semaine générée
 const MODEL = 'gpt-6-luna'
