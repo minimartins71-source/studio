@@ -32,7 +32,8 @@ export async function POST(request: Request) {
 
   // 1. Qui demande ? Le navigateur envoie le jeton de connexion du client.
   const token = request.headers.get('authorization')?.replace(/^Bearer /, '')
-  const supabase = createClient(supabaseUrl, secretKey, {
+  // On ne garde que https://xxxx.supabase.co, même si l'adresse copiée finit par /rest/v1/
+  const supabase = createClient(new URL(supabaseUrl).origin, secretKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   })
   const { data: auth } = token ? await supabase.auth.getUser(token) : { data: null }
